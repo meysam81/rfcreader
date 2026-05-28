@@ -1,0 +1,36 @@
+{
+  "name": "rfcreader",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Minimalist, accessible, mobile-first reader for IETF RFCs.",
+  "scripts": {
+    "prepare:assets": "node scripts/gen-icons.mjs && node scripts/build-rfc-index.mjs",
+    "dev": "bun run prepare:assets && astro dev",
+    "start": "astro dev",
+    "build": "bun run prepare:assets && astro check && astro build",
+    "preview": "astro preview",
+    "lint": "prettier -w . && oxlint --fix --fix-suggestions ."
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.2",
+    "@astrojs/vue": "^6.0.1",
+    "astro": "^6.1.1",
+    "minisearch": "^7.2.0",
+    "vue": "^3.5.31"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.8",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@vite-pwa/astro": "^1.2.0",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "fast-xml-parser": "^5.2.5",
+    "oxlint": "^1.57.0",
+    "prettier": "^3.8.1",
+    "prettier-plugin-astro": "^0.14.1",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3",
+    "vite-plugin-pwa": "^1.2.0"
+  }
+}
