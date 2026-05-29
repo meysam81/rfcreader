@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { HOME } from "@/lib/base";
 import { externalLinks, fetchRfcText } from "@/lib/rfc-sources";
@@ -26,6 +26,7 @@ const showToc = ref(false);
 const fontIndex = ref(2);
 const activeId = ref("");
 const progress = ref(0);
+const tocNav = ref<HTMLElement | null>(null);
 
 const links = computed(() => (number.value ? externalLinks(number.value) : []));
 const fontSize = computed(() => `${FONT_STEPS[fontIndex.value]}rem`);
@@ -82,6 +83,23 @@ function onScroll() {
   });
 }
 
+// Keep the active entry visible inside the (independently scrolling) ToC rail,
+// without nudging the page itself.
+watch(activeId, async (id) => {
+  if (!id) return;
+  await nextTick();
+  const nav = tocNav.value;
+  if (!nav) return;
+  const btn = nav.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`);
+  if (!btn) return;
+  const navRect = nav.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  if (btnRect.top < navRect.top || btnRect.bottom > navRect.bottom) {
+    const target = btn.offsetTop - nav.clientHeight / 2 + btn.clientHeight / 2;
+    nav.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  }
+});
+
 onMounted(async () => {
   try {
     const saved = Number(localStorage.getItem("rfcreader:fontIndex"));
@@ -128,7 +146,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl">
+  <div class="w-full">
     <!-- Sticky toolbar: back, text size, save — always reachable while reading. -->
     <div class="sticky top-14 z-10 -mx-4 mb-6 border-b border-border bg-bg/85 px-4 backdrop-blur">
       <div class="flex flex-wrap items-center gap-3 py-3">
@@ -228,7 +246,8 @@ onUnmounted(() => {
       <p v-if="meta?.authors?.length" class="mt-3 text-sm text-muted">
         {{ meta.authors.join(", ") }}
       </p>
-      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+      <!-- Compact meta pills; on very wide screens this moves to the details rail. -->
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs xl:hidden">
         <span
           v-if="meta?.status"
           class="rounded-full border border-border bg-surface px-2.5 py-1 font-medium text-muted"
@@ -276,12 +295,56 @@ onUnmounted(() => {
       </ul>
     </div>
 
-    <!-- Document -->
-    <div v-else class="lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:gap-12">
+    <!-- Document: details rail (xl) · content · table of contents (lg+) -->
+    <div
+      v-else
+      class="lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:gap-12 xl:grid-cols-[14rem_minmax(0,1fr)_16rem]"
+    >
+      <!-- Details rail (very wide screens only) -->
+      <aside class="order-first mb-10 hidden xl:block">
+        <div class="sticky top-28 space-y-6">
+          <div v-if="meta?.status || meta?.year || sourceLabel">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Details</p>
+            <dl class="space-y-2 text-sm">
+              <div v-if="meta?.status" class="flex items-baseline justify-between gap-3">
+                <dt class="text-muted">Status</dt>
+                <dd class="text-right text-fg">{{ meta.status.toLowerCase() }}</dd>
+              </div>
+              <div v-if="meta?.year" class="flex items-baseline justify-between gap-3">
+                <dt class="text-muted">Published</dt>
+                <dd class="text-right text-fg">{{ meta.year }}</dd>
+              </div>
+              <div v-if="sourceLabel" class="flex items-baseline justify-between gap-3">
+                <dt class="text-muted">Source</dt>
+                <dd class="text-right text-fg">{{ sourceLabel }}</dd>
+              </div>
+            </dl>
+          </div>
+          <div v-if="links.length" class="border-t border-border pt-6">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+              Read on source
+            </p>
+            <ul class="space-y-1.5">
+              <li v-for="l in links" :key="l.href">
+                <a
+                  :href="l.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-sm text-accent hover:underline"
+                >
+                  {{ l.label }} ↗
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </aside>
+
       <article aria-label="RFC document" class="min-w-0">
         <div class="rfc-body" :style="{ '--rfc-fs': fontSize }" v-html="bodyHtml"></div>
 
-        <footer class="mt-12 border-t border-border pt-6">
+        <!-- Source links live in the details rail on very wide screens. -->
+        <footer class="mt-12 border-t border-border pt-6 xl:hidden">
           <p class="text-sm font-medium text-muted">Read on the source</p>
           <ul class="mt-3 flex flex-wrap gap-2">
             <li v-for="l in links" :key="l.href">
@@ -301,6 +364,7 @@ onUnmounted(() => {
       <!-- Table of contents (sidebar on desktop) -->
       <aside v-if="sections.length" class="mt-12 hidden lg:mt-0 lg:block">
         <nav
+          ref="tocNav"
           aria-label="Table of contents"
           class="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-6"
         >
@@ -313,6 +377,7 @@ onUnmounted(() => {
             >
               <button
                 type="button"
+                :data-id="s.id"
                 class="-ml-px block w-full truncate border-l-2 py-1 pl-3 text-left text-sm transition-colors"
                 :class="
                   activeId === s.id
