@@ -141,3 +141,13 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Astro
+.astro/
+
+# Generated build assets (produced by scripts/ at build time)
+public/rfc-index.json
+public/icons/
+
+# PWA
+dev-dist/

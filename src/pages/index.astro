@@ -1,0 +1,20 @@
+---
+import Base from "@/layouts/Base.astro";
+import Search from "@/components/Search.vue";
+---
+
+<Base>
+  <section class="mx-auto max-w-3xl">
+    <h1 class="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
+      Read the RFCs, anywhere
+    </h1>
+    <p class="mt-2 text-muted">
+      Search the full IETF catalogue by number, title, keyword, or author — then read it in a clean,
+      mobile-first view.
+    </p>
+
+    <div class="mt-6">
+      <Search client:load />
+    </div>
+  </section>
+</Base>

@@ -1,0 +1,14 @@
+---
+import Base from "@/layouts/Base.astro";
+import Reader from "@/components/Reader.vue";
+---
+
+<Base title="RFC Reader" description="Read an IETF RFC in a clean, mobile-first view.">
+  <Reader client:only="vue" />
+  <noscript>
+    <p class="text-muted">
+      This reader needs JavaScript. You can read RFCs directly at
+      <a class="text-accent underline" href="https://www.rfc-editor.org">rfc-editor.org</a>.
+    </p>
+  </noscript>
+</Base>
