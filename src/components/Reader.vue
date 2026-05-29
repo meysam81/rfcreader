@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 
 import { HOME } from "@/lib/base";
 import { externalLinks, fetchRfcText } from "@/lib/rfc-sources";
@@ -24,6 +24,8 @@ const sections = ref<RfcSection[]>([]);
 const bookmarked = ref(false);
 const showToc = ref(false);
 const fontIndex = ref(2);
+const activeId = ref("");
+const progress = ref(0);
 
 const links = computed(() => (number.value ? externalLinks(number.value) : []));
 const fontSize = computed(() => `${FONT_STEPS[fontIndex.value]}rem`);
@@ -45,8 +47,39 @@ function onToggleBookmark() {
 
 function jumpTo(id: string) {
   showToc.value = false;
+  activeId.value = id;
   const el = document.getElementById(id);
   if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Track reading progress and the section currently under the toolbar so the
+// table of contents can highlight where the reader is.
+let ticking = false;
+function updateOnScroll() {
+  const doc = document.documentElement;
+  const scrollable = doc.scrollHeight - window.innerHeight;
+  progress.value =
+    scrollable > 0 ? Math.min(100, Math.max(0, (window.scrollY / scrollable) * 100)) : 0;
+
+  // The active heading is the last one whose top sits above the sticky chrome.
+  const threshold = 140;
+  let current = "";
+  for (const s of sections.value) {
+    const el = document.getElementById(s.id);
+    if (!el) continue;
+    if (el.getBoundingClientRect().top <= threshold) current = s.id;
+    else break; // headings are in document order, so we can stop early.
+  }
+  activeId.value = current || sections.value[0]?.id || "";
+}
+
+function onScroll() {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => {
+    updateOnScroll();
+    ticking = false;
+  });
 }
 
 onMounted(async () => {
@@ -76,111 +109,153 @@ onMounted(async () => {
     sections.value = formatted.sections;
     sourceLabel.value = source;
     pushRecent(meta.value ?? { n, title: title.value });
+
+    await nextTick();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    updateOnScroll();
   } catch (err) {
     error.value = err instanceof Error ? err.message : "Failed to load this RFC.";
   } finally {
     loading.value = false;
   }
 });
+
+onUnmounted(() => {
+  window.removeEventListener("scroll", onScroll);
+  window.removeEventListener("resize", onScroll);
+});
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
-    <!-- Header -->
-    <div class="mb-4 flex flex-wrap items-start gap-3">
-      <a
-        :href="HOME"
-        class="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-fg hover:bg-elevated"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="m15 18-6-6 6-6" />
-        </svg>
-        Search
-      </a>
-
-      <div class="ml-auto flex items-center gap-2">
-        <div
-          class="flex items-center rounded-lg border border-border bg-surface"
-          role="group"
-          aria-label="Text size"
-        >
-          <button
-            type="button"
-            class="px-2.5 py-1.5 text-sm text-fg hover:bg-elevated disabled:opacity-40"
-            :disabled="fontIndex === 0"
-            aria-label="Decrease text size"
-            @click="setFont(-1)"
-          >
-            A−
-          </button>
-          <button
-            type="button"
-            class="px-2.5 py-1.5 text-base text-fg hover:bg-elevated disabled:opacity-40"
-            :disabled="fontIndex === FONT_STEPS.length - 1"
-            aria-label="Increase text size"
-            @click="setFont(1)"
-          >
-            A+
-          </button>
-        </div>
-
-        <button
-          type="button"
-          class="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm transition-colors"
-          :class="
-            bookmarked
-              ? 'border-accent bg-accent text-accent-fg'
-              : 'border-border bg-surface text-fg hover:bg-elevated'
-          "
-          :aria-pressed="bookmarked"
-          @click="onToggleBookmark"
+  <div class="mx-auto max-w-5xl">
+    <!-- Sticky toolbar: back, text size, save — always reachable while reading. -->
+    <div class="sticky top-14 z-10 -mx-4 mb-6 border-b border-border bg-bg/85 px-4 backdrop-blur">
+      <div class="flex flex-wrap items-center gap-3 py-3">
+        <a
+          :href="HOME"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-elevated"
         >
           <svg
             width="16"
             height="16"
             viewBox="0 0 24 24"
-            :fill="bookmarked ? 'currentColor' : 'none'"
+            fill="none"
             stroke="currentColor"
             stroke-width="2"
             stroke-linecap="round"
             stroke-linejoin="round"
             aria-hidden="true"
           >
-            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+            <path d="m15 18-6-6 6-6" />
           </svg>
-          <span>{{ bookmarked ? "Saved" : "Save" }}</span>
-        </button>
+          Search
+        </a>
+
+        <div class="ml-auto flex items-center gap-2">
+          <div
+            class="flex items-center overflow-hidden rounded-lg border border-border bg-surface"
+            role="group"
+            aria-label="Text size"
+          >
+            <button
+              type="button"
+              class="px-2.5 py-1.5 text-sm text-fg transition-colors hover:bg-elevated disabled:opacity-40"
+              :disabled="fontIndex === 0"
+              aria-label="Decrease text size"
+              @click="setFont(-1)"
+            >
+              A−
+            </button>
+            <span class="h-5 w-px bg-border" aria-hidden="true"></span>
+            <button
+              type="button"
+              class="px-2.5 py-1.5 text-base text-fg transition-colors hover:bg-elevated disabled:opacity-40"
+              :disabled="fontIndex === FONT_STEPS.length - 1"
+              aria-label="Increase text size"
+              @click="setFont(1)"
+            >
+              A+
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors"
+            :class="
+              bookmarked
+                ? 'border-accent bg-accent text-accent-fg'
+                : 'border-border bg-surface text-fg hover:bg-elevated'
+            "
+            :aria-pressed="bookmarked"
+            @click="onToggleBookmark"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              :fill="bookmarked ? 'currentColor' : 'none'"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+            </svg>
+            <span>{{ bookmarked ? "Saved" : "Save" }}</span>
+          </button>
+        </div>
       </div>
+      <!-- Reading-progress indicator sits on the toolbar's bottom edge. -->
+      <div
+        class="absolute bottom-0 left-0 h-0.5 bg-accent transition-[width] duration-150 ease-out"
+        :style="{ width: `${progress}%` }"
+        role="progressbar"
+        aria-label="Reading progress"
+        :aria-valuenow="Math.round(progress)"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      ></div>
     </div>
 
     <!-- Title block -->
-    <header v-if="number" class="mb-6 border-b border-border pb-5">
+    <header v-if="number" class="mb-8 border-b border-border pb-6">
       <p class="font-mono text-sm font-semibold text-accent">RFC {{ number }}</p>
-      <h1 class="mt-1 text-2xl font-semibold leading-tight text-fg sm:text-3xl">{{ title }}</h1>
-      <p v-if="meta?.authors?.length" class="mt-2 text-sm text-muted">
+      <h1 class="mt-2 text-3xl font-bold leading-tight tracking-tight text-fg sm:text-4xl">
+        {{ title }}
+      </h1>
+      <p v-if="meta?.authors?.length" class="mt-3 text-sm text-muted">
         {{ meta.authors.join(", ") }}
       </p>
-      <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
-        <span v-if="meta?.status">{{ meta.status.toLowerCase() }}</span>
-        <span v-if="meta?.year">{{ meta.year }}</span>
-        <span v-if="sourceLabel">via {{ sourceLabel }}</span>
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+        <span
+          v-if="meta?.status"
+          class="rounded-full border border-border bg-surface px-2.5 py-1 font-medium text-muted"
+        >
+          {{ meta.status.toLowerCase() }}
+        </span>
+        <span
+          v-if="meta?.year"
+          class="rounded-full border border-border bg-surface px-2.5 py-1 font-medium text-muted"
+        >
+          {{ meta.year }}
+        </span>
+        <span v-if="sourceLabel" class="px-1 text-muted">via {{ sourceLabel }}</span>
       </div>
     </header>
 
-    <!-- Loading -->
-    <p v-if="loading" class="py-16 text-center text-muted" role="status">
-      Fetching RFC {{ number }}…
-    </p>
+    <!-- Loading skeleton -->
+    <div v-if="loading" class="animate-pulse space-y-4 py-6" role="status" aria-live="polite">
+      <span class="sr-only">Fetching RFC {{ number }}…</span>
+      <div class="h-4 w-3/4 rounded bg-surface"></div>
+      <div class="h-4 w-full rounded bg-surface"></div>
+      <div class="h-4 w-5/6 rounded bg-surface"></div>
+      <div class="h-4 w-full rounded bg-surface"></div>
+      <div class="h-32 w-full rounded-lg bg-surface"></div>
+      <div class="h-4 w-2/3 rounded bg-surface"></div>
+      <div class="h-4 w-full rounded bg-surface"></div>
+    </div>
 
     <!-- Error / fallback -->
     <div v-else-if="error" class="rounded-xl border border-border bg-surface p-5" role="alert">
@@ -202,19 +277,19 @@ onMounted(async () => {
     </div>
 
     <!-- Document -->
-    <div v-else class="lg:grid lg:grid-cols-[minmax(0,1fr)_15rem] lg:gap-8">
+    <div v-else class="lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:gap-12">
       <article aria-label="RFC document" class="min-w-0">
         <div class="rfc-body" :style="{ '--rfc-fs': fontSize }" v-html="bodyHtml"></div>
 
-        <footer class="mt-10 border-t border-border pt-5">
-          <p class="text-sm text-muted">Read on the source:</p>
-          <ul class="mt-2 flex flex-wrap gap-2">
+        <footer class="mt-12 border-t border-border pt-6">
+          <p class="text-sm font-medium text-muted">Read on the source</p>
+          <ul class="mt-3 flex flex-wrap gap-2">
             <li v-for="l in links" :key="l.href">
               <a
                 :href="l.href"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="inline-block rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-accent hover:border-accent"
+                class="inline-block rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-accent transition-colors hover:border-accent"
               >
                 {{ l.label }} ↗
               </a>
@@ -224,10 +299,13 @@ onMounted(async () => {
       </article>
 
       <!-- Table of contents (sidebar on desktop) -->
-      <aside v-if="sections.length" class="mt-10 hidden lg:mt-0 lg:block">
-        <nav aria-label="Table of contents" class="sticky top-20 max-h-[80vh] overflow-y-auto">
-          <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Contents</p>
-          <ul class="space-y-1 text-sm">
+      <aside v-if="sections.length" class="mt-12 hidden lg:mt-0 lg:block">
+        <nav
+          aria-label="Table of contents"
+          class="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-6"
+        >
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">On this page</p>
+          <ul class="border-l border-border">
             <li
               v-for="s in sections"
               :key="s.id"
@@ -235,11 +313,16 @@ onMounted(async () => {
             >
               <button
                 type="button"
-                class="block w-full truncate text-left text-muted hover:text-accent"
+                class="-ml-px block w-full truncate border-l-2 py-1 pl-3 text-left text-sm transition-colors"
+                :class="
+                  activeId === s.id
+                    ? 'border-accent font-medium text-accent'
+                    : 'border-transparent text-muted hover:border-border hover:text-fg'
+                "
                 :title="`${s.label} ${s.title}`"
                 @click="jumpTo(s.id)"
               >
-                <span class="font-mono text-xs">{{ s.label }}</span> {{ s.title }}
+                <span class="font-mono text-xs opacity-70">{{ s.label }}</span> {{ s.title }}
               </button>
             </li>
           </ul>
@@ -293,7 +376,7 @@ onMounted(async () => {
             ✕
           </button>
         </div>
-        <ul class="space-y-2 text-sm">
+        <ul class="space-y-1 text-sm">
           <li
             v-for="s in sections"
             :key="s.id"
@@ -301,10 +384,15 @@ onMounted(async () => {
           >
             <button
               type="button"
-              class="block w-full text-left text-muted hover:text-accent"
+              class="block w-full rounded-md px-2 py-1.5 text-left transition-colors"
+              :class="
+                activeId === s.id
+                  ? 'bg-surface font-medium text-accent'
+                  : 'text-muted hover:text-accent'
+              "
               @click="jumpTo(s.id)"
             >
-              <span class="font-mono text-xs">{{ s.label }}</span> {{ s.title }}
+              <span class="font-mono text-xs opacity-70">{{ s.label }}</span> {{ s.title }}
             </button>
           </li>
         </ul>
