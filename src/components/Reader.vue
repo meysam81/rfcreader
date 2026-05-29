@@ -12,7 +12,7 @@ import {
   type RfcMeta,
 } from "@/lib/store";
 
-const FONT_STEPS = [0.78, 0.84, 0.9, 0.98, 1.08, 1.2];
+const FONT_STEPS = [0.9, 1.0, 1.1, 1.25, 1.4, 1.6];
 
 const number = ref<number | null>(null);
 const meta = ref<RfcMeta | null>(null);
@@ -204,7 +204,7 @@ onMounted(async () => {
     <!-- Document -->
     <div v-else class="lg:grid lg:grid-cols-[minmax(0,1fr)_15rem] lg:gap-8">
       <article aria-label="RFC document" class="min-w-0">
-        <pre class="rfc-body" :style="{ '--rfc-fs': fontSize }" v-html="bodyHtml"></pre>
+        <div class="rfc-body" :style="{ '--rfc-fs': fontSize }" v-html="bodyHtml"></div>
 
         <footer class="mt-10 border-t border-border pt-5">
           <p class="text-sm text-muted">Read on the source:</p>

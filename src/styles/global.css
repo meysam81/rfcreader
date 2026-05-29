@@ -98,24 +98,85 @@ body {
   white-space: normal;
 }
 
-/* Rendered RFC body: monospace, wraps on small screens, preserves ASCII art. */
+/* Rendered RFC body: reflowed prose in a proportional font with a comfortable
+   measure; verbatim monospace is scoped to preformatted blocks only. */
 .rfc-body {
-  font-family: var(--font-mono);
-  font-size: var(--rfc-fs, 0.9rem);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  tab-size: 4;
+  font-family: var(--font-sans);
+  font-size: var(--rfc-fs, 1.1rem);
+  line-height: 1.7;
+  color: var(--color-fg);
+  max-width: 70ch;
+  overflow-wrap: break-word;
 }
+
+.rfc-body p {
+  margin: 0 0 1.1em;
+}
+
 .rfc-body a {
   color: var(--color-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* Headings (numbered, appendix, and well-known unnumbered sections). */
 .rfc-body .rfc-h {
-  display: inline-block;
   font-weight: 700;
+  line-height: 1.3;
   color: var(--color-fg);
   scroll-margin-top: 5rem;
+  text-wrap: balance;
+}
+.rfc-body h2.rfc-h {
+  font-size: 1.45em;
+  margin: 2em 0 0.6em;
+}
+.rfc-body h3.rfc-h {
+  font-size: 1.2em;
+  margin: 1.8em 0 0.5em;
+}
+.rfc-body h4.rfc-h,
+.rfc-body h5.rfc-h,
+.rfc-body h6.rfc-h {
+  font-size: 1.05em;
+  margin: 1.6em 0 0.4em;
+}
+.rfc-body :is(h2, h3, h4, h5, h6).rfc-h:first-child {
+  margin-top: 0;
+}
+.rfc-body .rfc-h-num {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lists. */
+.rfc-body .rfc-list {
+  margin: 0 0 1.1em;
+  padding-left: 1.6em;
+}
+.rfc-body ul.rfc-list {
+  list-style: disc;
+}
+.rfc-body ol.rfc-list {
+  list-style: decimal;
+}
+.rfc-body .rfc-list li {
+  margin: 0.35em 0;
+}
+
+/* Verbatim blocks: ASCII art, packet diagrams, code, tables, front matter.
+   Kept monospace and horizontally scrollable so they never break the layout. */
+.rfc-body .rfc-pre {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 0 1.3em;
+  padding: 0.85rem 1rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.6rem;
+  tab-size: 4;
 }
