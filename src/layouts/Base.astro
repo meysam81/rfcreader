@@ -61,7 +61,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <link rel="sitemap" href={withBase("sitemap-index.xml")} />
   </head>
 
-  <body class="min-h-dvh">
+  <body class="flex min-h-dvh flex-col">
     <a
       href="#main"
       class="sr-only focus:not-sr-only left-3 top-3 z-50 rounded-lg bg-accent px-3 py-2 text-sm text-accent-fg"
@@ -97,18 +97,40 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
       </div>
     </header>
 
-    <main id="main" class={`mx-auto px-4 py-6 sm:py-8 ${container}`}>
+    <main id="main" class={`mx-auto w-full flex-1 px-4 py-6 sm:py-8 ${container}`}>
       <slot />
     </main>
 
-    <footer class="mt-12 border-t border-border">
-      <div class={`mx-auto px-4 py-6 text-sm text-muted ${container}`}>
+    <footer class="border-t border-border">
+      <div
+        class={`mx-auto flex flex-col gap-3 px-4 py-6 text-sm text-muted sm:flex-row sm:items-center sm:justify-between ${container}`}
+      >
         <p>
           RFC text is fetched live from the
           <a class="text-accent underline underline-offset-2" href="https://www.rfc-editor.org"
             >RFC Editor</a
           > and mirrors. This is an independent reader, not affiliated with the IETF.
         </p>
+        <nav class="flex items-center gap-4" aria-label="Footer">
+          <a
+            class="hover:text-fg"
+            href="https://github.com/meysam81/rfcreader"
+            target="_blank"
+            rel="noopener noreferrer">Source</a
+          >
+          <a
+            class="hover:text-fg"
+            href="https://github.com/meysam81/rfcreader/issues"
+            target="_blank"
+            rel="noopener noreferrer">Issues</a
+          >
+          <a
+            class="hover:text-fg"
+            href="https://github.com/meysam81/rfcreader/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer">License</a
+          >
+        </nav>
       </div>
     </footer>
 
