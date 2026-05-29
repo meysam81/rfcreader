@@ -122,7 +122,9 @@ onMounted(async () => {
         boost: { num: 6, title: 3 },
       },
     });
-    mini.addAll(docs);
+    // Index asynchronously in chunks so the main thread stays responsive —
+    // the search box remains focusable and typeable while the catalogue indexes.
+    await mini.addAllAsync(docs, { chunkSize: 500 });
   } catch (err) {
     error.value = err instanceof Error ? err.message : "Failed to load the RFC catalogue.";
   } finally {
@@ -262,8 +264,12 @@ function statusTone(status: string): string {
           inputmode="search"
           autocomplete="off"
           enterkeyhint="search"
-          :disabled="loading || !!error"
-          placeholder="Search 9000+ RFCs — try “HTTP”, “TLS 1.3”, or “2616”"
+          :disabled="!!error"
+          :placeholder="
+            loading
+              ? 'Loading RFCs… start typing, results appear when ready'
+              : 'Search 9000+ RFCs — try “HTTP”, “TLS 1.3”, or “2616”'
+          "
           class="w-full rounded-xl border border-border bg-surface py-3 pl-10 pr-3 text-base text-fg placeholder:text-muted focus:border-accent disabled:opacity-60"
         />
       </div>
@@ -374,7 +380,7 @@ function statusTone(status: string): string {
 
     <!-- States -->
     <p v-if="loading" class="mt-8 text-center text-muted" role="status">
-      Loading the RFC catalogue…
+      Loading the RFC catalogue… you can start typing now — results appear the moment it’s ready.
     </p>
     <div
       v-else-if="error"
