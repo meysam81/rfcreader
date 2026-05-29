@@ -158,7 +158,26 @@ export function formatRfc(raw: string): FormattedRfc {
     out.push(`<${tag} class="rfc-h" id="${id}">${num}${linkify(escapeHtml(title))}</${tag}>`);
   }
 
+  // A single flush-left line that reads as a heading; null otherwise.
+  function detectHeading(block: string[]): { label: string; title: string; level: number; inToc: boolean } | null {
+    if (block.length !== 1 || !/^\S/.test(block[0])) return null;
+    const line = block[0];
+    const match = HEADING_RE.exec(line) ?? APPENDIX_RE.exec(line);
+    if (match) {
+      const label = match[1];
+      const level = /^appendix/i.test(label) ? 1 : (label.match(/\./g)?.length ?? 0) + 1;
+      return { label, title: match[2].trim(), level, inToc: true };
+    }
+    if (UNNUMBERED_RE.test(line) && line.length <= 60) {
+      return { label: "", title: line.trim(), level: 1, inToc: false };
+    }
+    return null;
+  }
+
   let i = 0;
+  // The inline "Table of Contents" duplicates the sidebar/drawer ToC, so we drop
+  // its heading and every block up to the next real heading.
+  let skipToc = false;
   while (i < cleaned.length) {
     if (cleaned[i].trim() === "") {
       i += 1;
@@ -171,21 +190,17 @@ export function formatRfc(raw: string): FormattedRfc {
       i += 1;
     }
 
-    // Headings: a single flush-left line.
-    if (block.length === 1 && /^\S/.test(block[0])) {
-      const line = block[0];
-      const match = HEADING_RE.exec(line) ?? APPENDIX_RE.exec(line);
-      if (match) {
-        const label = match[1];
-        const level = /^appendix/i.test(label) ? 1 : (label.match(/\./g)?.length ?? 0) + 1;
-        pushHeading(label, match[2].trim(), level, true);
+    const heading = detectHeading(block);
+    if (heading) {
+      if (/^table of contents$/i.test(heading.title)) {
+        skipToc = true;
         continue;
       }
-      if (UNNUMBERED_RE.test(line) && line.length <= 60) {
-        pushHeading("", line.trim(), 1, false);
-        continue;
-      }
+      skipToc = false;
+      pushHeading(heading.label, heading.title, heading.level, heading.inToc);
+      continue;
     }
+    if (skipToc) continue;
 
     // Lists (checked before preformatted: bullet markers can look tabular).
     const kind = listKind(block);
