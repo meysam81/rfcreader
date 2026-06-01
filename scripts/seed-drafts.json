@@ -1,0 +1,16 @@
+[
+  {
+    "id": "draft-ietf-dkim-dkim2-spec",
+    "title": "DKIM2 Email Signing and Validation",
+    "authors": [],
+    "year": 2025,
+    "month": "",
+    "status": "INTERNET-DRAFT",
+    "stream": "IETF",
+    "abstract": "DKIM2 is a reworking of the DomainKeys Identified Mail (DKIM) email authentication mechanism. This document specifies how participants in the email delivery chain add cryptographic signatures so that message modifications can be detected and forwarding paths reversed.",
+    "keywords": ["dkim", "dkim2", "email", "authentication", "signing"],
+    "obsoletedBy": [],
+    "updatedBy": [],
+    "rev": "00"
+  }
+]

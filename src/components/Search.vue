@@ -3,10 +3,21 @@ import { computed, onMounted, onUnmounted, ref, watch, type Ref } from "vue";
 import MiniSearch from "minisearch";
 
 import { withBase } from "@/lib/base";
-import { cacheMeta, getBookmarks, getRecents, pushRecent, type RfcMeta } from "@/lib/store";
+import { isDraftId, resolveDraft } from "@/lib/rfc-sources";
+import {
+  cacheMeta,
+  getBookmarks,
+  getRecents,
+  metaKey,
+  pushRecent,
+  type RfcMeta,
+} from "@/lib/store";
 
 interface Rfc {
-  n: number;
+  // RFCs carry a number; internet-drafts carry an `id` (and optional `rev`).
+  n?: number;
+  id?: string;
+  rev?: string | null;
   title: string;
   authors: string[];
   year: number | null;
@@ -18,6 +29,11 @@ interface Rfc {
   obsoletedBy: number[];
   updatedBy: number[];
 }
+
+/** Stable string identity for a catalogue entry: draft name, else RFC number. */
+const keyOf = (r: Rfc): string => r.id ?? String(r.n);
+// Numeric sort key; drafts have no number, so they sort to the end.
+const num = (r: Rfc): number => r.n ?? -Infinity;
 
 const PAGE_SIZE = 40;
 
@@ -47,7 +63,7 @@ const limit = ref(PAGE_SIZE);
 const bookmarks = ref<RfcMeta[]>([]);
 const recents = ref<RfcMeta[]>([]);
 
-const byNumber = new Map<number, Rfc>();
+const byKey = new Map<string, Rfc>();
 let mini: MiniSearch | null = null;
 
 const statusOptions = ref<string[]>([]);
@@ -94,12 +110,14 @@ onMounted(async () => {
     const statuses = new Set<string>();
     const streams = new Set<string>();
     const docs = data.rfcs.map((r) => {
-      byNumber.set(r.n, r);
+      const key = keyOf(r);
+      byKey.set(key, r);
       if (r.status) statuses.add(r.status);
       if (r.stream) streams.add(r.stream);
       return {
-        n: r.n,
-        num: String(r.n),
+        key,
+        // Draft names are searchable; RFC numbers stay the strongest signal.
+        num: r.id ?? String(r.n),
         title: r.title,
         abstract: r.abstract,
         authorsText: r.authors.join(" "),
@@ -113,7 +131,7 @@ onMounted(async () => {
     streamOptions.value = [...streams].toSorted();
 
     mini = new MiniSearch({
-      idField: "n",
+      idField: "key",
       fields: ["num", "title", "abstract", "authorsText", "keywordsText"],
       searchOptions: {
         prefix: true,
@@ -158,42 +176,87 @@ const results = computed<Rfc[]>(() => {
   if (mini && q) {
     const ordered = mini
       .search(q)
-      .map((hit) => byNumber.get(Number(hit.id)))
+      .map((hit) => byKey.get(String(hit.id)))
       .filter((r): r is Rfc => Boolean(r));
-    // Pure-number queries: float an exact RFC match to the top.
-    if (/^\d+$/.test(q)) {
-      const exact = byNumber.get(Number(q));
-      if (exact && !ordered.some((r) => r.n === exact.n)) ordered.unshift(exact);
+    // Exact number / draft-name queries: float the precise match to the top.
+    if (/^\d+$/.test(q) || isDraftId(q)) {
+      const exact = byKey.get(q);
+      if (exact && !ordered.some((r) => keyOf(r) === keyOf(exact))) ordered.unshift(exact);
       else if (exact) {
-        const i = ordered.findIndex((r) => r.n === exact.n);
+        const i = ordered.findIndex((r) => keyOf(r) === keyOf(exact));
         if (i > 0) ordered.splice(0, 0, ordered.splice(i, 1)[0]);
       }
     }
     list = ordered;
   } else {
-    list = [...byNumber.values()];
+    list = [...byKey.values()];
   }
 
   list = list.filter(passesFilters);
 
+  // Numeric sorts are RFC-centric; drafts (no number) sort to the end.
   const relevanceMatters = Boolean(mini && q);
   switch (sort.value) {
     case "number-desc":
-      list.sort((a, b) => b.n - a.n);
+      list.sort((a, b) => num(b) - num(a));
       break;
     case "number-asc":
-      list.sort((a, b) => a.n - b.n);
+      list.sort((a, b) => num(a) - num(b));
       break;
     case "newest":
-      list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.n - a.n);
+      list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || num(b) - num(a));
       break;
     default:
-      if (!relevanceMatters) list.sort((a, b) => b.n - a.n);
+      if (!relevanceMatters) list.sort((a, b) => num(b) - num(a));
   }
   return list;
 });
 
 const visible = computed(() => results.value.slice(0, limit.value));
+
+// Runtime fallback: a draft-shaped query with no catalogue match is resolved
+// live against the Datatracker, so uncurated drafts stay readable. A miss leaves
+// `probedDraft` null and the view falls through to the empty state.
+const probedDraft = ref<Rfc | null>(null);
+const probing = ref(false);
+let probeToken = 0;
+
+watch(debouncedQuery, (raw) => {
+  const q = raw.trim();
+  const token = ++probeToken;
+  probedDraft.value = null;
+  if (loading.value || !isDraftId(q) || byKey.has(q) || results.value.length > 0) {
+    probing.value = false;
+    return;
+  }
+  probing.value = true;
+  resolveDraft(q)
+    .then((info) => {
+      if (token !== probeToken) return; // a newer query superseded this probe
+      probedDraft.value = info
+        ? {
+            id: info.id,
+            rev: info.rev,
+            title: info.title,
+            authors: [],
+            year: info.year,
+            month: "",
+            status: info.status,
+            stream: "",
+            abstract: info.abstract,
+            keywords: [],
+            obsoletedBy: [],
+            updatedBy: [],
+          }
+        : null;
+    })
+    .catch(() => {
+      if (token === probeToken) probedDraft.value = null;
+    })
+    .finally(() => {
+      if (token === probeToken) probing.value = false;
+    });
+});
 
 function toggleSet(set: Ref<Set<string>>, value: string) {
   const next = new Set(set.value);
@@ -209,13 +272,20 @@ function clearFilters() {
   excludeObsoleted.value = false;
 }
 
-function readerHref(n: number): string {
-  return withBase(`rfc/?number=${n}`);
+function readerHref(d: { n?: number; id?: string }): string {
+  return d.id ? withBase(`rfc/?id=${encodeURIComponent(d.id)}`) : withBase(`rfc/?number=${d.n}`);
+}
+
+/** Display label: the draft name for drafts, "RFC NNNN" otherwise. */
+function label(d: { n?: number; id?: string }): string {
+  return d.id ?? `RFC ${d.n}`;
 }
 
 function open(r: Rfc | RfcMeta) {
   const meta: RfcMeta = {
     n: r.n,
+    id: "id" in r ? r.id : undefined,
+    rev: "rev" in r ? r.rev : undefined,
     title: r.title,
     authors: "authors" in r ? r.authors : undefined,
     year: "year" in r ? r.year : undefined,
@@ -398,13 +468,13 @@ function statusTone(status: string): string {
           Bookmarks
         </h2>
         <ul class="space-y-2">
-          <li v-for="b in bookmarks" :key="b.n">
+          <li v-for="b in bookmarks" :key="metaKey(b)">
             <a
-              :href="readerHref(b.n)"
+              :href="readerHref(b)"
               class="block rounded-lg border border-border bg-surface px-4 py-3 hover:border-accent"
               @click="open(b)"
             >
-              <span class="font-mono text-sm text-accent">RFC {{ b.n }}</span>
+              <span class="font-mono text-sm text-accent">{{ label(b) }}</span>
               <span class="ml-2 text-fg">{{ b.title }}</span>
             </a>
           </li>
@@ -416,13 +486,13 @@ function statusTone(status: string): string {
           Recently read
         </h2>
         <ul class="space-y-2">
-          <li v-for="r in recents" :key="r.n">
+          <li v-for="r in recents" :key="metaKey(r)">
             <a
-              :href="readerHref(r.n)"
+              :href="readerHref(r)"
               class="block rounded-lg border border-border bg-surface px-4 py-3 hover:border-accent"
               @click="open(r)"
             >
-              <span class="font-mono text-sm text-accent">RFC {{ r.n }}</span>
+              <span class="font-mono text-sm text-accent">{{ label(r) }}</span>
               <span class="ml-2 text-fg">{{ r.title }}</span>
             </a>
           </li>
@@ -442,14 +512,16 @@ function statusTone(status: string): string {
         {{ results.length === 1 ? "result" : "results" }}
       </p>
       <ul class="space-y-3">
-        <li v-for="r in visible" :key="r.n">
+        <li v-for="r in visible" :key="keyOf(r)">
           <a
-            :href="readerHref(r.n)"
+            :href="readerHref(r)"
             class="block rounded-xl border border-border bg-surface p-4 transition-colors hover:border-accent"
             @click="open(r)"
           >
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span class="font-mono text-sm font-semibold text-accent">RFC {{ r.n }}</span>
+              <span class="break-all font-mono text-sm font-semibold text-accent">{{
+                label(r)
+              }}</span>
               <span v-if="r.status" class="text-xs" :class="statusTone(r.status)">{{
                 r.status.toLowerCase()
               }}</span>
@@ -469,7 +541,31 @@ function statusTone(status: string): string {
         </li>
       </ul>
 
-      <p v-if="!results.length" class="mt-8 text-center text-muted">No RFCs match your search.</p>
+      <template v-if="!results.length">
+        <!-- Runtime-resolved internet-draft (not in the baked catalogue). -->
+        <a
+          v-if="probedDraft"
+          :href="readerHref(probedDraft)"
+          class="mt-6 block rounded-xl border border-border bg-surface p-4 transition-colors hover:border-accent"
+          @click="open(probedDraft)"
+        >
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="break-all font-mono text-sm font-semibold text-accent">{{
+              probedDraft.id
+            }}</span>
+            <span class="text-xs text-sky-500">internet-draft</span>
+            <span v-if="probedDraft.rev" class="text-xs text-muted">rev {{ probedDraft.rev }}</span>
+          </div>
+          <h3 class="mt-1 font-medium text-fg">{{ probedDraft.title }}</h3>
+          <p v-if="probedDraft.abstract" class="mt-2 line-clamp-2 text-sm text-muted">
+            {{ probedDraft.abstract }}
+          </p>
+        </a>
+        <p v-else-if="probing" class="mt-8 text-center text-muted" role="status">
+          Looking up internet-draft…
+        </p>
+        <p v-else class="mt-8 text-center text-muted">No RFCs match your search.</p>
+      </template>
 
       <div v-if="visible.length < results.length" class="mt-6 text-center">
         <button

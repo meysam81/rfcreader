@@ -28,6 +28,8 @@ const HEADING_RE = /^(\d+(?:\.\d+)*)\.?\s+(\S.*)$/;
 const APPENDIX_RE = /^(Appendix\s+[A-Z][\dA-Z]*)\.?[:\s]+(\S.*)$/i;
 const PAGE_FOOTER_RE = /\[Page\s+\d+\]\s*$/;
 const PAGE_HEADER_RE = /^RFC\s+\d+\b.*\b(19|20)\d{2}\s*$/;
+// Internet-drafts carry a running header instead of an "RFC NNNN" one.
+const DRAFT_HEADER_RE = /^Internet-Draft\b.*\b(19|20)\d{2}\s*$/i;
 
 // Bullet ("o", "*", "-", "•") and ordered ("1.", "1)", "(1)", "a.") list markers.
 const BULLET_RE = /^(\s*)([*+•o-])\s+(\S.*)$/;
@@ -139,7 +141,7 @@ export function formatRfc(raw: string): FormattedRfc {
   const cleaned: string[] = [];
   for (const line of sourceLines) {
     if (PAGE_FOOTER_RE.test(line)) continue;
-    if (line.length > 40 && PAGE_HEADER_RE.test(line)) continue;
+    if (line.length > 40 && (PAGE_HEADER_RE.test(line) || DRAFT_HEADER_RE.test(line))) continue;
     cleaned.push(line.replace(/\s+$/, ""));
   }
 
@@ -159,7 +161,9 @@ export function formatRfc(raw: string): FormattedRfc {
   }
 
   // A single flush-left line that reads as a heading; null otherwise.
-  function detectHeading(block: string[]): { label: string; title: string; level: number; inToc: boolean } | null {
+  function detectHeading(
+    block: string[],
+  ): { label: string; title: string; level: number; inToc: boolean } | null {
     if (block.length !== 1 || !/^\S/.test(block[0])) return null;
     const line = block[0];
     const match = HEADING_RE.exec(line) ?? APPENDIX_RE.exec(line);

@@ -2,10 +2,17 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { HOME } from "@/lib/base";
-import { externalLinks, fetchRfcText } from "@/lib/rfc-sources";
+import {
+  draftExternalLinks,
+  externalLinks,
+  fetchDraftText,
+  fetchRfcText,
+  isDraftId,
+} from "@/lib/rfc-sources";
 import { formatRfc, type RfcSection } from "@/lib/rfc-text";
 import {
   isBookmarked,
+  metaKey,
   pushRecent,
   readCachedMeta,
   toggleBookmark,
@@ -15,6 +22,8 @@ import {
 const FONT_STEPS = [0.9, 1.0, 1.1, 1.25, 1.4, 1.6];
 
 const number = ref<number | null>(null);
+const draftId = ref<string | null>(null);
+const rev = ref<string | null>(null);
 const meta = ref<RfcMeta | null>(null);
 const loading = ref(true);
 const error = ref("");
@@ -28,9 +37,31 @@ const activeId = ref("");
 const progress = ref(0);
 const tocNav = ref<HTMLElement | null>(null);
 
-const links = computed(() => (number.value ? externalLinks(number.value) : []));
+const isDraft = computed(() => Boolean(draftId.value));
+const docLabel = computed(() =>
+  draftId.value ? draftId.value : number.value ? `RFC ${number.value}` : "RFC",
+);
+const links = computed(() =>
+  draftId.value
+    ? draftExternalLinks(draftId.value, rev.value)
+    : number.value
+      ? externalLinks(number.value)
+      : [],
+);
 const fontSize = computed(() => `${FONT_STEPS[fontIndex.value]}rem`);
-const title = computed(() => meta.value?.title ?? (number.value ? `RFC ${number.value}` : "RFC"));
+const title = computed(() => meta.value?.title ?? docLabel.value);
+
+// Current document identity, used for bookmarking / recents.
+const currentMeta = computed<RfcMeta>(() => ({
+  n: number.value ?? undefined,
+  id: draftId.value ?? undefined,
+  rev: rev.value,
+  title: title.value,
+  authors: meta.value?.authors,
+  year: meta.value?.year,
+  status: meta.value?.status,
+  stream: meta.value?.stream,
+}));
 
 function setFont(delta: number) {
   fontIndex.value = Math.min(FONT_STEPS.length - 1, Math.max(0, fontIndex.value + delta));
@@ -42,8 +73,8 @@ function setFont(delta: number) {
 }
 
 function onToggleBookmark() {
-  if (!number.value) return;
-  bookmarked.value = toggleBookmark(meta.value ?? { n: number.value, title: title.value });
+  if (!number.value && !draftId.value) return;
+  bookmarked.value = toggleBookmark(currentMeta.value);
 }
 
 function jumpTo(id: string) {
@@ -109,31 +140,50 @@ onMounted(async () => {
   }
 
   const params = new URLSearchParams(window.location.search);
+  const idParam = (params.get("id") ?? "").trim();
   const n = Number(params.get("number"));
-  if (!Number.isInteger(n) || n <= 0) {
-    error.value = "No RFC number was provided.";
+
+  let key: string;
+  if (idParam && isDraftId(idParam)) {
+    draftId.value = idParam;
+    rev.value = params.get("rev") || null;
+    key = idParam;
+  } else if (Number.isInteger(n) && n > 0) {
+    number.value = n;
+    key = String(n);
+  } else {
+    error.value = "No RFC number or draft name was provided.";
     loading.value = false;
     return;
   }
-  number.value = n;
-  meta.value = readCachedMeta(n);
-  bookmarked.value = isBookmarked(n);
-  document.title = `${meta.value?.title ? `RFC ${n}: ${meta.value.title}` : `RFC ${n}`} · RFC Reader`;
+
+  meta.value = readCachedMeta(key);
+  if (draftId.value && !rev.value) rev.value = meta.value?.rev ?? null;
+  bookmarked.value = isBookmarked(key);
+  document.title = `${meta.value?.title ? `${docLabel.value}: ${meta.value.title}` : docLabel.value} · RFC Reader`;
 
   try {
-    const { text, source } = await fetchRfcText(n);
+    let text: string;
+    let source: string;
+    if (draftId.value) {
+      const r = await fetchDraftText(draftId.value, rev.value);
+      ({ text, source } = r);
+      rev.value = r.rev;
+    } else {
+      ({ text, source } = await fetchRfcText(number.value!));
+    }
     const formatted = formatRfc(text);
     bodyHtml.value = formatted.html;
     sections.value = formatted.sections;
     sourceLabel.value = source;
-    pushRecent(meta.value ?? { n, title: title.value });
+    pushRecent(currentMeta.value);
 
     await nextTick();
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll, { passive: true });
     updateOnScroll();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : "Failed to load this RFC.";
+    error.value = err instanceof Error ? err.message : "Failed to load this document.";
   } finally {
     loading.value = false;
   }
@@ -238,8 +288,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Title block -->
-    <header v-if="number" class="mb-8 border-b border-border pb-6">
-      <p class="font-mono text-sm font-semibold text-accent">RFC {{ number }}</p>
+    <header v-if="number || draftId" class="mb-8 border-b border-border pb-6">
+      <p class="break-all font-mono text-sm font-semibold text-accent">{{ docLabel }}</p>
       <h1 class="mt-2 text-3xl font-bold leading-tight tracking-tight text-fg sm:text-4xl">
         {{ title }}
       </h1>
@@ -249,7 +299,13 @@ onUnmounted(() => {
       <!-- Compact meta pills; on very wide screens this moves to the details rail. -->
       <div class="mt-4 flex flex-wrap items-center gap-2 text-xs xl:hidden">
         <span
-          v-if="meta?.status"
+          v-if="isDraft"
+          class="rounded-full border border-border bg-surface px-2.5 py-1 font-medium text-muted"
+        >
+          internet-draft{{ rev ? ` · rev ${rev}` : "" }}
+        </span>
+        <span
+          v-else-if="meta?.status"
           class="rounded-full border border-border bg-surface px-2.5 py-1 font-medium text-muted"
         >
           {{ meta.status.toLowerCase() }}
@@ -266,7 +322,7 @@ onUnmounted(() => {
 
     <!-- Loading skeleton -->
     <div v-if="loading" class="animate-pulse space-y-4 py-6" role="status" aria-live="polite">
-      <span class="sr-only">Fetching RFC {{ number }}…</span>
+      <span class="sr-only">Fetching {{ docLabel }}…</span>
       <div class="h-4 w-3/4 rounded bg-surface"></div>
       <div class="h-4 w-full rounded bg-surface"></div>
       <div class="h-4 w-5/6 rounded bg-surface"></div>
@@ -280,8 +336,8 @@ onUnmounted(() => {
     <div v-else-if="error" class="rounded-xl border border-border bg-surface p-5" role="alert">
       <p class="font-medium text-fg">Couldn’t load this RFC in the app.</p>
       <p class="mt-1 text-sm text-muted">{{ error }}</p>
-      <p v-if="number" class="mt-4 text-sm text-fg">Read it on an official source instead:</p>
-      <ul v-if="number" class="mt-2 flex flex-wrap gap-2">
+      <p v-if="links.length" class="mt-4 text-sm text-fg">Read it on an official source instead:</p>
+      <ul v-if="links.length" class="mt-2 flex flex-wrap gap-2">
         <li v-for="l in links" :key="l.href">
           <a
             :href="l.href"
@@ -303,12 +359,20 @@ onUnmounted(() => {
       <!-- Details rail (very wide screens only) -->
       <aside class="order-first mb-10 hidden xl:block">
         <div class="sticky top-28 space-y-6">
-          <div v-if="meta?.status || meta?.year || sourceLabel">
+          <div v-if="isDraft || meta?.status || meta?.year || sourceLabel">
             <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Details</p>
             <dl class="space-y-2 text-sm">
-              <div v-if="meta?.status" class="flex items-baseline justify-between gap-3">
+              <div v-if="isDraft" class="flex items-baseline justify-between gap-3">
+                <dt class="text-muted">Status</dt>
+                <dd class="text-right text-fg">internet-draft</dd>
+              </div>
+              <div v-else-if="meta?.status" class="flex items-baseline justify-between gap-3">
                 <dt class="text-muted">Status</dt>
                 <dd class="text-right text-fg">{{ meta.status.toLowerCase() }}</dd>
+              </div>
+              <div v-if="rev" class="flex items-baseline justify-between gap-3">
+                <dt class="text-muted">Revision</dt>
+                <dd class="text-right text-fg">{{ rev }}</dd>
               </div>
               <div v-if="meta?.year" class="flex items-baseline justify-between gap-3">
                 <dt class="text-muted">Published</dt>
