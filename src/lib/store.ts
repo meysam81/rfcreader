@@ -2,12 +2,22 @@
 // No accounts, no network — everything lives on the device.
 
 export interface RfcMeta {
-  n: number;
+  /** RFC number — present for RFCs, absent for internet-drafts. */
+  n?: number;
+  /** Draft name (e.g. "draft-ietf-dkim-dkim2-spec") — present for drafts. */
+  id?: string;
+  /** Draft revision, when known. */
+  rev?: string | null;
   title?: string;
   authors?: string[];
   year?: number | null;
   status?: string;
   stream?: string;
+}
+
+/** Stable identity for a document: the draft name, else the RFC number. */
+export function metaKey(m: Pick<RfcMeta, "n" | "id">): string {
+  return m.id ?? String(m.n);
 }
 
 const BOOKMARKS_KEY = "rfcreader:bookmarks";
@@ -41,13 +51,14 @@ export function getBookmarks(): RfcMeta[] {
   return read<RfcMeta[]>(BOOKMARKS_KEY, []);
 }
 
-export function isBookmarked(n: number): boolean {
-  return getBookmarks().some((b) => b.n === n);
+export function isBookmarked(key: string): boolean {
+  return getBookmarks().some((b) => metaKey(b) === key);
 }
 
 export function toggleBookmark(meta: RfcMeta): boolean {
   const list = getBookmarks();
-  const idx = list.findIndex((b) => b.n === meta.n);
+  const key = metaKey(meta);
+  const idx = list.findIndex((b) => metaKey(b) === key);
   if (idx >= 0) {
     list.splice(idx, 1);
     write(BOOKMARKS_KEY, list);
@@ -63,7 +74,8 @@ export function getRecents(): RfcMeta[] {
 }
 
 export function pushRecent(meta: RfcMeta): void {
-  const list = getRecents().filter((r) => r.n !== meta.n);
+  const key = metaKey(meta);
+  const list = getRecents().filter((r) => metaKey(r) !== key);
   list.unshift(meta);
   write(RECENTS_KEY, list.slice(0, MAX_RECENTS));
 }
@@ -77,16 +89,16 @@ export function clearRecents(): void {
 export function cacheMeta(meta: RfcMeta): void {
   if (!isBrowser) return;
   try {
-    sessionStorage.setItem(`rfcreader:meta:${meta.n}`, JSON.stringify(meta));
+    sessionStorage.setItem(`rfcreader:meta:${metaKey(meta)}`, JSON.stringify(meta));
   } catch {
     /* ignore */
   }
 }
 
-export function readCachedMeta(n: number): RfcMeta | null {
+export function readCachedMeta(key: string): RfcMeta | null {
   if (!isBrowser) return null;
   try {
-    const raw = sessionStorage.getItem(`rfcreader:meta:${n}`);
+    const raw = sessionStorage.getItem(`rfcreader:meta:${key}`);
     return raw ? (JSON.parse(raw) as RfcMeta) : null;
   } catch {
     return null;
